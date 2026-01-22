@@ -1,0 +1,8 @@
+Product availability by region:
+
+- Invisible Headphones: 24
+- SmartBrew Mini: 6
+- AeroSoft Tee: 12
+- Titan Mini: 8
+- TimberRide: 1
+- Mystery Book: 0
