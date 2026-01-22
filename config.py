@@ -1,10 +1,11 @@
 """Config module"""
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Settings class"""
+    model_config = SettingsConfigDict(env_file=".env")
 
     MISTRAL_API_KEY: str = ""
     DOCUMENTS_DIRECTORY: str = "documents"
@@ -13,11 +14,6 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP_SIZE: int = 100
     TOP_K: int = 5
     CALLBACK_URL: str = ""
-
-    class Config:
-        """Config class"""
-
-        env_file = ".env"
 
 
 settings = Settings()

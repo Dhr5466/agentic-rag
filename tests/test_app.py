@@ -3,10 +3,11 @@
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-
-from app import UserInput, app, process_user_input
+from app import enqueue_query, queue
+from app import UserInput, app
 
 QUERY_VALIDATION_ERROR: str = "Query must contain words"
+SUCCESS_RESPONSE_MESSAGE: str = "User query enqueued successfully!"
 
 
 @pytest.fixture(scope="module")
@@ -92,34 +93,44 @@ class TestUserInputModel:
         assert len(user_input.query) == 10000
 
 
-class TestProcessUserInput:
-    """Test cases for process_user_input function"""
+class TestEnqueueQuery:
+    """Test cases for enqueue_query function"""
 
     @pytest.mark.asyncio
-    async def test_process_user_input_normal(self):
-        """Test processing normal user input"""
+    async def test_enqueue_query_normal(self):
+        """Test enqueuing normal user input"""
+        
         user_input = UserInput(query="Hello world", user_id="user123")
-        result = await process_user_input(user_input)
-
-        assert isinstance(result, dict)
-        assert "user_id" in result
-        assert result["user_id"] == "user123"
+        await enqueue_query(user_input)
+        
+        # Check that the item was added to the queue
+        assert not queue.empty()
+        
+        # Clean up the queue
+        await queue.get()
+        queue.task_done()
 
     @pytest.mark.asyncio
-    async def test_process_user_input_empty_query(self):
-        """Test processing user input with empty query - should fail validation"""
+    async def test_enqueue_query_empty_query(self):
+        """Test enqueuing user input with empty query - should fail validation"""
         with pytest.raises(ValidationError) as exc_info:
             UserInput(query="", user_id="user123")
         assert QUERY_VALIDATION_ERROR in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_process_user_input_long_query(self):
-        """Test processing user input with very long query"""
+    async def test_enqueue_query_long_query(self):
+        """Test enqueuing user input with very long query"""
+        
         long_query = "A" * 10000
         user_input = UserInput(query=long_query, user_id="user123")
-        result = await process_user_input(user_input)
-
-        assert result["user_id"] == "user123"
+        await enqueue_query(user_input)
+        
+        # Check that the item was added to the queue
+        assert not queue.empty()
+        
+        # Clean up the queue
+        await queue.get()
+        queue.task_done()
 
 
 class TestQueryEndpoint:
@@ -130,7 +141,7 @@ class TestQueryEndpoint:
         response = client.post("/query", json={"query": "Hello world", "user_id": "user123"})
 
         assert response.status_code == 200
-        assert response.json() == {"message": "User query waiting to be processed."}
+        assert response.json() == {"message": SUCCESS_RESPONSE_MESSAGE}
 
     def test_query_endpoint_missing_query(self, client: TestClient):
         """Test POST request with missing query field"""
@@ -159,7 +170,7 @@ class TestQueryEndpoint:
         response = client.post("/query", json={"query": "Hello world", "user_id": "user123"})
 
         assert response.status_code == 200
-        assert response.json() == {"message": "User query waiting to be processed."}
+        assert response.json() == {"message": SUCCESS_RESPONSE_MESSAGE}
 
 
 class TestErrorHandling:
@@ -181,12 +192,18 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_full_flow(self):
         """Test the complete request processing flow"""
+        from app import enqueue_query, queue
+        
         user_input = UserInput(query="Test integration", user_id="user123")
 
         # Test that the input is valid
         assert user_input.query == "Test integration"
         assert user_input.user_id == "user123"
 
-        # Test that processing works
-        result = await process_user_input(user_input)
-        assert result["user_id"] == "user123"
+        # Test that enqueuing works
+        await enqueue_query(user_input)
+        assert not queue.empty()
+        
+        # Clean up the queue
+        await queue.get()
+        queue.task_done()
