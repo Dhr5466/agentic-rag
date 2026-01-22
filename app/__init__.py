@@ -5,11 +5,13 @@ import logging
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+import httpx
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from agents.responder import responder_agent
 from app import utils
+from config import settings
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -46,8 +48,16 @@ async def process_user_input() -> dict:
             {"messages": [{"role": "user", "content": user_input.query}]}
         )
         query_response = result.get("messages")[-1].content
-        # TODO: Send this response to a webhook
-        logger.info(" * Result: %s", query_response)
+        async with httpx.AsyncClient() as client:
+            try:
+                webhook_response = await client.post(
+                    url=settings.CALLBACK_URL,
+                    json={"query": user_input.query, "response": query_response},
+                )
+                logger.info(" * WEBHOOK RESPONSE: %s", webhook_response)
+            except Exception as error:
+                logger.error(error)
+        logger.info(" * RAG RESPONSE: %s", query_response)
         queue.task_done()
 
 
@@ -75,6 +85,14 @@ async def user_query(user_input: UserInput, background_tasks: BackgroundTasks):
         return {"message": "User query enqueued successfully!"}
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.post("/webhook")
+async def receive_callback(data: dict, request: Request):
+    logger.info("\n--- RECEIVED CALLBACK ---")
+    logger.info("From: %s:%s", request.client.host, request.client.port)
+    logger.info("Callback Data: %s\n-------------------------", data)
+    return {"status": "success", "message": "Callback received"}
 
 
 if __name__ == "__main__":

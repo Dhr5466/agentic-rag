@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP_SIZE: int = 100
     TOP_K: int = 5
+    CALLBACK_URL: str = ""
 
     class Config:
         """Config class"""
