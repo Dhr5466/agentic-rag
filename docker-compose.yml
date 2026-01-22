@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - DOCUMENTS_DIRECTORY=/app/documents
+      - VECTOR_DB_DIRECTORY=/app/.vector_db
+      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
+      - CHUNK_OVERLAP_SIZE=${CHUNK_OVERLAP_SIZE:-100}
+      - TOP_K=${TOP_K:-5}
+      - CALLBACK_URL=${CALLBACK_URL:-}
+    volumes:
+      - ./documents:/app/documents:ro
+      - ./.vector_db:/app/.vector_db
+    restart: unless-stopped
