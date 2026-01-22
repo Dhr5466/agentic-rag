@@ -11,6 +11,7 @@ from langchain_mistralai import MistralAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import settings
+from rag.vector import vector_store
 
 logger = getLogger(__name__)
 
@@ -28,10 +29,9 @@ class RAGIngestion:
         self.docs: list[Document] | list[list[Document]] = []
         self.splits: list[Document] = []
         self.document_ids: list[str] = []
+        self.vector_store: VectorStore | Chroma = vector_store
         # TODO: reconfigure logging class to show class name in logs
         logger.info("%s: Initializing RAG pipeline", self.__class__.__name__)
-        self.vector_store: VectorStore | Chroma = self.setup_vector_database()
-        logger.info("%s: Vector database initialized", self.__class__.__name__)
         self.load_documents()
         logger.info("%s: Loaded %s documents", self.__class__.__name__, len(self.docs))
         self.split_documents()
@@ -45,15 +45,6 @@ class RAGIngestion:
             "%s: Sub-documents added to vector store: %s",
             self.__class__.__name__,
             len(self.document_ids),
-        )
-
-    @staticmethod
-    def setup_vector_database():
-        """Create the vector store or restore if it exists"""
-        return Chroma(
-            collection_name="product_collection",
-            embedding_function=MistralAIEmbeddings(api_key=settings.MISTRAL_API_KEY),
-            persist_directory=settings.VECTOR_DB_DIRECTORY,  # File based vector db
         )
 
     def load_documents(self):
@@ -89,3 +80,7 @@ class RAGIngestion:
             raise RAGIngestionException(f"{self.__class__.__name__}: No sub-documents loaded")
         self.document_ids = self.vector_store.add_documents(documents=self.splits)
         logger.info("Indexed documents: %s", len(self.vector_store.get().get("ids")))
+
+
+if __name__ == "__main__":
+    ...
