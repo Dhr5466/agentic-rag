@@ -3,7 +3,8 @@
 import logging
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+import re
 
 app = FastAPI(debut=True, title="RAG multiagent chatbot")
 
@@ -17,6 +18,13 @@ class UserInput(BaseModel):
 
     query: str
     user_id: str
+
+    @field_validator('query')
+    def validate_query_has_letters(cls, value):
+        """Validate that query contains at least one letter"""
+        if not re.search(r'[a-zA-Z]', value):
+            raise ValueError('Query must contain words')
+        return value
 
 
 async def process_user_input(user_input) -> dict:
