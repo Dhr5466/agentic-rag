@@ -1,6 +1,8 @@
 # Simple Docker Compose commands
 
-.PHONY: help build up down logs shell clean
+.PHONY: help build up down logs shell test clean
+
+compose = docker compose
 
 help:
 	@echo "Available commands:"
@@ -9,23 +11,27 @@ help:
 	@echo "  down   - Stop the application"
 	@echo "  logs   - View application logs"
 	@echo "  shell  - Open shell in container"
+	@echo "  test   - Run tests in container"
 	@echo "  clean  - Remove containers and images"
 
 build:
-	docker-compose build
+	$(compose) build
 
 up:
-	docker-compose up -d
+	$(compose) up -d
 
 down:
-	docker-compose down
+	$(compose) down
 
 logs:
-	docker-compose logs -f
+	$(compose) logs -f
 
 shell:
-	docker-compose exec app bash
+	$(compose) exec app bash
+
+test:
+	$(compose) exec app uv run pytest tests/
 
 clean:
-	docker-compose down
+	$(compose) down
 	docker system prune -f
