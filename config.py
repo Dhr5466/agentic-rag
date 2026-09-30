@@ -7,7 +7,8 @@ class Settings(BaseSettings):
     """Settings class"""
     model_config = SettingsConfigDict(env_file=".env")
 
-    MISTRAL_API_KEY: str = ""
+    #MISTRAL_API_KEY: str = ""
+    DEEPSEEK_API_KEY: str = ""
     DOCUMENTS_DIRECTORY: str = "documents"
     VECTOR_DB_DIRECTORY: str = ".vector_db"
     CHUNK_SIZE: int = 1000

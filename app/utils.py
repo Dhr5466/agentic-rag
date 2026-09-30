@@ -10,14 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 def index_documents():
-    """Main pipeline"""
-    logger.info("Indexing %s", settings.DOCUMENTS_DIRECTORY)
+    """主流程"""
+    logger.info("正在索引 %s", settings.DOCUMENTS_DIRECTORY)
     try:
         RAGIngestion(docs_directory=settings.DOCUMENTS_DIRECTORY)
-        logger.info("Indexing COMPLETE!")
+        logger.info("索引完成！")
     except Exception as ex:
         logger.error(ex)
-
 
 if __name__ == "__main__":
     index_documents()
