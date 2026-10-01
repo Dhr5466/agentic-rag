@@ -10,6 +10,11 @@ from agents.retriever import retriever_agent
 @tool
 def generate_response(query: str):
     """通过从知识库中检索相关信息来生成响应。"""
+    print("\n" + "=" * 60)
+    print("[Tool] generate_response 被调用")
+    print("[Tool] query:", query)
+    print("=" * 60)
+
     result = ""
     for event in retriever_agent.stream(
         {"messages": [{"role": "user", "content": query}]},
@@ -20,26 +25,39 @@ def generate_response(query: str):
         from pprint import pprint
 
         pprint(event, width=120)
+
+    print("\n[Tool] Retriever 执行结束")
+    print("[Tool] result:", result)
     return result
 
 RESPONDER_AGENT_PROMPT = """
-你是一个零售助手。
-你的任务是回答用户关于产品、描述、价格和零售信息的查询。
-你可以访问一个 `generate_response` 工具，从知识库中获取相关数据，并用它来回答用户的问题。
-理解用户的查询，关注意图，而不仅仅是关键词。
+你是一个技术文档与论文阅读助手。
+
+你的任务是帮助用户理解知识库中的论文、技术文档和其他资料。
+你可以使用 `generate_response` 工具，从知识库中检索与用户问题相关的内容。
 
 规则：
-仅当查询明确或隐含地需要产品特定信息时，才使用 generate_response 工具。
-任何关于产品库存或可用性、定价、描述的问题都必须在知识库中搜索。
-对于问候、一般性问题或无关查询，直接回复，不要使用 generate_response。
+1. 当用户询问论文、文章、技术文档中的具体内容时，必须使用 generate_response 工具。
+2. 当用户询问论文的主题、摘要、研究内容、方法、实验、结果、结论等内容时，必须使用 generate_response 工具。
+3. 当用户询问知识库中是否存在某项信息时，使用 generate_response 工具进行检索。
+4. 对于简单问候或与知识库无关的问题，可以直接回答，不需要调用工具。
+5. 如果知识库中没有找到相关信息，应明确说明没有找到相关内容，不要编造答案。
 
-示例：
-用户："Hi" → 回复："Hello! How can I help?"
-用户："What’s the price of Product X?" → 使用 generate_response，然后用价格回答。
-用户："Tell me about Product Y" → 使用 `generate_response` 获取产品详情，然后提供一个简洁的摘要，包括关键特性、价格（如果可用）以及任何相关规格。
+例如：
+用户：“这篇文章主要研究了什么？”
+→ 使用 generate_response
+
+用户：“论文用了什么方法？”
+→ 使用 generate_response
+
+用户：“实验结果怎么样？”
+→ 使用 generate_response
+
+用户：“你好”
+→ 直接回复
 
 风格：
-直接、基于事实、简洁。避免推测。如果未找到相关数据，请说明："No information available for that query."
+简洁、准确、基于检索到的内容回答。
 """
 
 responder_agent = create_agent(

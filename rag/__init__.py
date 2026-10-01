@@ -25,8 +25,9 @@ class RAGIngestionException(Exception):
 class RAGIngestion:
     """RAG Ingestion Pipeline  RAG 知识库的数据入库流水线"""
 
-    def __init__(self, docs_directory: str):
+    def __init__(self, docs_directory: str, reset: bool = False):
         """初始化Pipeline管道"""
+        self.reset: bool = reset
         self.directory: str = docs_directory#文档目录
         self.docs: list[Document] | list[list[Document]] = []#原始文档
         self.splits: list[Document] = []#切完之后的小块
@@ -56,7 +57,7 @@ class RAGIngestion:
                 f"{self.__class__.__name__}: 未加载目录"
             )
 
-        self.vector_store.reset_collection()
+        #self.vector_store.reset_collection()
 
         docs_directory = os.path.join(
             os.path.dirname(__file__),
@@ -161,8 +162,24 @@ self.docs = [
             else:
                 for sub in char_splitter.split_documents([s]):
                     self.splits.append(sub)
+
+    def ensure_indexed(docs_directory: str = "documents"):
+        """只在向量库为空时才建索引"""
+        from rag.vector import vector_store
+
+        ids = vector_store.get().get("ids", [])
+        if ids:
+            print(f"[eval] 向量库已有 {len(ids)} 条，跳过索引")
+            return
+
+        print("[eval] 向量库为空，开始索引")
+        RAGIngestion(docs_directory=docs_directory, reset=False)
     def store_documents(self):
         """存储文档"""
+        #TOOD
+        if self.reset:
+            self.vector_store.reset_collection()
+
         self.vector_store.reset_collection()#之后可以不要每次服务启动都重建整个知识库，而是做增量索引。
         if not self.splits:
             raise RAGIngestionException(f"{self.__class__.__name__}: 未加载子文档")
