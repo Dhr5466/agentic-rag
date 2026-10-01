@@ -1,8 +1,0 @@
-Here is a list of product IDs according to providers:
-
-- Titan Mini: ab246cb6
-- TimberRide: 42faa664
-- AeroSoft Tee: 0172a78e
-- Mystery Book: 1427b3b0
-- SmartBrew Mini: b550452f
-- Invisible Headphones: c3e66a94

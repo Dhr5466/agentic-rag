@@ -1,9 +1,0 @@
-**Titan Mini**:
-
-The **Titan Mini** is a pocket-friendly smartphone with a 4.7-inch OLED display, designed for one-handed use without sacrificing performance.
-It runs on a Snapdragon 7 Gen 3 chip, paired with 6GB of RAM and 128GB of storage.
-The 12MP dual-camera setup delivers sharp photos, while the 2,800mAh battery keeps it running for a full day with moderate use.
-The body is aluminum with a matte finish, resistant to scratches and fingerprints.
-It supports 5G, wireless charging, and runs the latest Android OS. No bloatware, just a clean interface. Weighs 120g and fits in any pocket.
-
-Available in black, silver, and sage green.
