@@ -1,4 +1,4 @@
-"""Unit tests for the FastAPI application"""
+"""FastAPI 应用的单元测试"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6,87 +6,87 @@ from pydantic import ValidationError
 from app import enqueue_query, queue
 from app import UserInput, app
 
-QUERY_VALIDATION_ERROR: str = "Query must contain words"
-SUCCESS_RESPONSE_MESSAGE: str = "User query enqueued successfully!"
+QUERY_VALIDATION_ERROR: str = "查询不能为空，且至少包含一个字母、数字或汉字"
+SUCCESS_RESPONSE_MESSAGE: str = "用户查询已成功加入队列！"
 
 
 @pytest.fixture(scope="module")
 def client():
-    """Create a test client for synchronous requests"""
+    """创建一个用于同步请求的测试客户端"""
     return TestClient(app)
 
 
 class TestUserInputModel:
-    """Test cases for UserInput Pydantic model"""
+    """UserInput Pydantic 模型的测试用例"""
 
     def test_valid_user_input(self):
-        """Test creating UserInput with valid data"""
+        """测试使用有效数据创建 UserInput"""
         user_input = UserInput(query="Hello world", user_id="user123")
         assert user_input.query == "Hello world"
         assert user_input.user_id == "user123"
 
     def test_missing_query(self):
-        """Test UserInput with missing query field"""
+        """测试缺少 query 字段的 UserInput"""
         with pytest.raises(ValidationError) as exc_info:
             UserInput(user_id="user123")
         assert "query" in str(exc_info.value)
 
     def test_missing_user_id(self):
-        """Test UserInput with missing user_id field"""
+        """测试缺少 user_id 字段的 UserInput"""
         with pytest.raises(ValidationError) as exc_info:
             UserInput(query="Hello world")
         assert "user_id" in str(exc_info.value)
 
     def test_empty_query(self):
-        """Test UserInput with empty query"""
-        # Empty query should fail validation since it has no letters
+        """测试空 query 的 UserInput"""
+        # 空 query 应该验证失败，因为它没有内容
         with pytest.raises(ValidationError) as exc_info:
             UserInput(query="", user_id="user123")
         assert QUERY_VALIDATION_ERROR in str(exc_info.value)
 
     def test_query_with_only_numbers(self):
-        """Test UserInput with query containing only numbers"""
-        # Query with only numbers should fail validation
+        """测试仅包含数字的 query 的 UserInput"""
+        # 仅包含数字的 query 应该验证失败
         with pytest.raises(ValidationError) as exc_info:
             UserInput(query="12345", user_id="user123")
         assert QUERY_VALIDATION_ERROR in str(exc_info.value)
 
     def test_query_with_only_symbols(self):
-        """Test UserInput with query containing only symbols"""
-        # Query with only symbols should fail validation
+        """测试仅包含符号的 query 的 UserInput"""
+        # 仅包含符号的 query 应该验证失败
         with pytest.raises(ValidationError) as exc_info:
             UserInput(query="!@#$%", user_id="user123")
         assert QUERY_VALIDATION_ERROR in str(exc_info.value)
 
     def test_query_with_only_whitespace(self):
-        """Test UserInput with query containing only whitespace"""
-        # Query with only whitespace should fail validation
+        """测试仅包含空白字符的 query 的 UserInput"""
+        # 仅包含空白字符的 query 应该验证失败
         with pytest.raises(ValidationError) as exc_info:
             UserInput(query="   \t\n", user_id="user123")
         assert QUERY_VALIDATION_ERROR in str(exc_info.value)
 
     def test_query_with_letters_and_numbers(self):
-        """Test UserInput with query containing letters and numbers"""
-        # Query with letters and numbers should pass validation
+        """测试包含字母和数字的 query 的 UserInput"""
+        # 包含字母和数字的 query 应该通过验证
         user_input = UserInput(query="Hello123", user_id="user123")
         assert user_input.query == "Hello123"
         assert user_input.user_id == "user123"
 
     def test_query_with_letters_and_symbols(self):
-        """Test UserInput with query containing letters and symbols"""
-        # Query with letters and symbols should pass validation
+        """测试包含字母和符号的 query 的 UserInput"""
+        # 包含字母和符号的 query 应该通过验证
         user_input = UserInput(query="Hello!@#", user_id="user123")
         assert user_input.query == "Hello!@#"
         assert user_input.user_id == "user123"
 
     def test_empty_user_id(self):
-        """Test UserInput with empty user_id"""
+        """测试空 user_id 的 UserInput"""
         user_input = UserInput(query="Hello world", user_id="")
         assert user_input.query == "Hello world"
         assert user_input.user_id == ""
 
     def test_long_query(self):
-        """Test UserInput with very long query"""
+        """测试非常长的 query 的 UserInput"""
         long_query = "A" * 10000
         user_input = UserInput(query=long_query, user_id="user123")
         assert user_input.query == long_query
@@ -94,79 +94,79 @@ class TestUserInputModel:
 
 
 class TestEnqueueQuery:
-    """Test cases for enqueue_query function"""
+    """enqueue_query 函数的测试用例"""
 
     @pytest.mark.asyncio
     async def test_enqueue_query_normal(self):
-        """Test enqueuing normal user input"""
-        
+        """测试将普通用户输入加入队列"""
+
         user_input = UserInput(query="Hello world", user_id="user123")
         await enqueue_query(user_input)
-        
-        # Check that the item was added to the queue
+
+        # 检查项目是否已添加到队列
         assert not queue.empty()
-        
-        # Clean up the queue
+
+        # 清理队列
         await queue.get()
         queue.task_done()
 
     @pytest.mark.asyncio
     async def test_enqueue_query_empty_query(self):
-        """Test enqueuing user input with empty query - should fail validation"""
+        """测试将空 query 的用户输入加入队列 - 应该验证失败"""
         with pytest.raises(ValidationError) as exc_info:
             UserInput(query="", user_id="user123")
         assert QUERY_VALIDATION_ERROR in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_enqueue_query_long_query(self):
-        """Test enqueuing user input with very long query"""
-        
+        """测试将非常长的 query 的用户输入加入队列"""
+
         long_query = "A" * 10000
         user_input = UserInput(query=long_query, user_id="user123")
         await enqueue_query(user_input)
-        
-        # Check that the item was added to the queue
+
+        # 检查项目是否已添加到队列
         assert not queue.empty()
-        
-        # Clean up the queue
+
+        # 清理队列
         await queue.get()
         queue.task_done()
 
 
 class TestQueryEndpoint:
-    """Test cases for /query endpoint"""
+    """/query 端点的测试用例"""
 
     def test_query_endpoint_success(self, client: TestClient):
-        """Test successful POST request to /query endpoint"""
+        """测试成功向 /query 端点发送 POST 请求"""
         response = client.post("/query", json={"query": "Hello world", "user_id": "user123"})
 
         assert response.status_code == 200
         assert response.json() == {"message": SUCCESS_RESPONSE_MESSAGE}
 
     def test_query_endpoint_missing_query(self, client: TestClient):
-        """Test POST request with missing query field"""
+        """测试缺少 query 字段的 POST 请求"""
         response = client.post("/query", json={"user_id": "user123"})
 
-        assert response.status_code == 422  # Unprocessable Entity
+        assert response.status_code == 422  # 无法处理的实体
         error_detail = response.json()
         assert "detail" in error_detail
 
     def test_query_endpoint_missing_user_id(self, client: TestClient):
-        """Test POST request with missing user_id field"""
+        """测试缺少 user_id 字段的 POST 请求"""
         response = client.post("/query", json={"query": "Hello world"})
 
-        assert response.status_code == 422  # Unprocessable Entity
+        assert response.status_code == 422  # 无法处理的实体
         error_detail = response.json()
         assert "detail" in error_detail
 
     def test_query_endpoint_empty_body(self, client: TestClient):
-        """Test POST request with empty body"""
+        """测试空请求体的 POST 请求"""
         response = client.post("/query", json={})
 
-        assert response.status_code == 422  # Unprocessable Entity
+        assert response.status_code == 422  # 无法处理的实体
 
     def test_query_endpoint_with_client(self, client: TestClient):
-        """Test POST request to /query endpoint using test client"""
+        """使用测试客户端测试向 /query 端点发送 POST 请求"""
         response = client.post("/query", json={"query": "Hello world", "user_id": "user123"})
 
         assert response.status_code == 200
@@ -174,36 +174,36 @@ class TestQueryEndpoint:
 
 
 class TestErrorHandling:
-    """Test cases for error handling"""
+    """错误处理的测试用例"""
 
     def test_internal_server_error(self, client: TestClient):
-        """Test HTTP 500 error handling"""
-        # For now, just test that the endpoint handles errors properly
-        # We can't easily mock the background task without pytest-mock
+        """测试 HTTP 500 错误处理"""
+        # 目前只测试端点是否正确处理错误
+        # 没有 pytest-mock 的话，我们不容易 mock 后台任务
         response = client.post("/query", json={"query": "Hello world", "user_id": "user123"})
 
-        # This should succeed normally
+        # 正常情况下这应该成功
         assert response.status_code == 200
 
 
 class TestIntegration:
-    """Integration tests for the complete flow"""
+    """完整流程的集成测试"""
 
     @pytest.mark.asyncio
     async def test_full_flow(self):
-        """Test the complete request processing flow"""
+        """测试完整的请求处理流程"""
         from app import enqueue_query, queue
-        
+
         user_input = UserInput(query="Test integration", user_id="user123")
 
-        # Test that the input is valid
+        # 测试输入是否有效
         assert user_input.query == "Test integration"
         assert user_input.user_id == "user123"
 
-        # Test that enqueuing works
+        # 测试入队是否正常工作
         await enqueue_query(user_input)
         assert not queue.empty()
-        
-        # Clean up the queue
+
+        # 清理队列
         await queue.get()
         queue.task_done()

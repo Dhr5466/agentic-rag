@@ -1,6 +1,5 @@
 """Agents module"""
 
-from langchain_mistralai import ChatMistralAI
 
 from config import settings
 from langchain_openai import ChatOpenAI

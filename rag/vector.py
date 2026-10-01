@@ -12,7 +12,7 @@ embedding_model = HuggingFaceEmbeddings(
 )#把一句话转换成一串数字（向量）的工具。
 
 vector_store = Chroma(
-    collection_name="product_collection",
+    collection_name="paper_collection",
     embedding_function=embedding_model,  # 以后 Chroma 收到文本的时候，就自动调用这个 Embedding 模型，把文本转成向量。
     persist_directory=settings.VECTOR_DB_DIRECTORY,  # 基于文件的向量数据库
 )#专门帮你保存这些向量，并且根据“相似程度”把相关内容找出来的向量数据库。
