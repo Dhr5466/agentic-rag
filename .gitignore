@@ -208,3 +208,7 @@ __marimo__/
 
 # Project
 .vector_db/
+.rag_file_hashes.json
+rag_manifest.json
+documents/.rag_file_hashes.json
+documents/rag_manifest.json

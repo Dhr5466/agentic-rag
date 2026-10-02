@@ -10,11 +10,6 @@ from agents.retriever import retriever_agent
 @tool
 def generate_response(query: str):
     """通过从知识库中检索相关信息来生成响应。"""
-    print("\n" + "=" * 60)
-    print("[Tool] generate_response 被调用")
-    print("[Tool] query:", query)
-    print("=" * 60)
-
     result = ""
     for event in retriever_agent.stream(
         {"messages": [{"role": "user", "content": query}]},
@@ -22,12 +17,6 @@ def generate_response(query: str):
     ):
         event["messages"][-1].pretty_print()
         result = event["messages"][-1]
-        from pprint import pprint
-
-        pprint(event, width=120)
-
-    print("\n[Tool] Retriever 执行结束")
-    print("[Tool] result:", result)
     return result
 
 RESPONDER_AGENT_PROMPT = """

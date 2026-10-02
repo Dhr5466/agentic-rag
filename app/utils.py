@@ -5,7 +5,6 @@ import logging
 from config import settings
 from rag import RAGIngestion
 
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -15,8 +14,9 @@ def index_documents():
     try:
         RAGIngestion(docs_directory=settings.DOCUMENTS_DIRECTORY)
         logger.info("索引完成！")
-    except Exception as ex:
-        logger.error(ex)
+    except Exception:
+        logger.exception("RAG 索引失败，检索功能可能不可用")
+        raise
 
 if __name__ == "__main__":
     index_documents()

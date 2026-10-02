@@ -15,6 +15,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter,MarkdownHead
 from config import settings
 from rag.vector import vector_store
 
+import hashlib
+import json
 logger = getLogger(__name__)
 
 
@@ -23,169 +25,314 @@ class RAGIngestionException(Exception):
 
 
 class RAGIngestion:
-    """RAG Ingestion Pipeline  RAG 知识库的数据入库流水线"""
+    """RAG Ingestion Pipeline
 
-    def __init__(self, docs_directory: str, reset: bool = False):
-        """初始化Pipeline管道"""
-        self.reset: bool = reset
-        self.directory: str = docs_directory#文档目录
-        self.docs: list[Document] | list[list[Document]] = []#原始文档
-        self.splits: list[Document] = []#切完之后的小块
-        self.document_ids: list[str] = []#存进向量数据库后的 ID
-        self.vector_store: VectorStore | Chroma = vector_store
-        # TODO: 重新配置日志类以在日志中显示类名
-        logger.info("%s: 正在初始化 RAG 管道", self.__class__.__name__)
-        self.load_documents()
-        logger.info("%s: 已加载 %s 个文档", self.__class__.__name__, len(self.docs))
-        self.split_documents()
-        logger.info(
-            "%s: 文档已拆分为 %s 个子文档。",
-            self.__class__.__name__,
-            len(self.splits),
-        )
-        self.store_documents()
-        logger.info(
-            "%s: 子文档已添加到向量存储: %s",
-            self.__class__.__name__,
-            len(self.document_ids),
-        )
-
-    def load_documents(self):#把文件 变成 LangChain Document #现在添加pdf
-        """从目录加载文档"""
-        if not self.directory:
-            raise RAGIngestionException(
-                f"{self.__class__.__name__}: 未加载目录"
-            )
-
-        #self.vector_store.reset_collection()
-
-        docs_directory = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            self.directory,
-        )
-
-        file_list = []
-
-        for filename in os.listdir(docs_directory):
-            if filename.endswith((".txt", ".md", ".pdf")):
-                file_list.append(
-                    os.path.join(docs_directory, filename)
-                )
-
-        self.docs = []
-
-        for file_path in file_list:
-            if file_path.endswith(".pdf"):
-                documents = self.load_pdf(file_path)
-            else:
-                documents = TextLoader(file_path).load()
-
-            self.docs.extend(documents)   # ← 改成 extend 防止套娃
-        """最后加载出来的是这样的有内容也有来源
-        Document(page_content="...",metadata={...})
-最后是变成一个这个
-self.docs = [
-    [Document(...)],
-    [Document(...)],
-    [Document(...)]
-]
+    - reset=True : 清空整个向量库后全量重建
+    - 新文件     : 增量入库
+    - 文件修改   : 删除旧 chunk 后重新入库
+    - 文件未变   : 跳过
+    - 文件删除   : 删除对应 chunk
+    - 任何一步失败，不写入哈希文件，下次启动重试
     """
 
+    HASH_FILE_NAME = ".rag_file_hashes.json"
 
-    def load_pdf(self,file_path: str | Path) -> list[Document]:
-        """
-        将 PDF 解析成 LangChain Document。
-        一页对应一个 Document。
-        """
+    def __init__(self, docs_directory: str, reset: bool = False):
+        self.reset = reset
+        self.directory = docs_directory
 
-        pages = pymupdf4llm.to_markdown(
-            str(file_path),
-            page_chunks=True,
-            header=False,
-            footer=False,
+        # 向量库
+        self.vector_store: VectorStore | Chroma = vector_store
+
+        # 文档目录（绝对路径）
+        self.docs_directory = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", self.directory)
         )
 
-        documents = []
+        # 哈希文件放在文档目录之外，避免随文档一起被拷贝/移动
+        self.hash_file = os.path.join(
+            os.path.dirname(self.docs_directory), self.HASH_FILE_NAME
+        )
 
-        for page in pages:
-            text = page["text"].strip()
+        # 状态
+        self.docs: list[Document] = []
+        self.splits: list[Document] = []
+        self.document_ids: list[str] = []
 
-            if not text:
-                continue
+        self.saved_hashes: dict[str, str] = {}
+        self.current_hashes: dict[str, str] = {}
+        # 统一用「相对路径」当键
+        self.changed_files: list[str] = []   # 需要新增/重建的相对路径
+        self.removed_files: list[str] = []   # 需要删除的相对路径
 
-            metadata = dict(page["metadata"])
+        logger.info("%s: 初始化 RAG 管道", self.__class__.__name__)
+        logger.info("%s: 文档目录 = %s", self.__class__.__name__, self.docs_directory)
+        logger.info("%s: 哈希文件 = %s", self.__class__.__name__, self.hash_file)
 
-            documents.append(
-                Document(
-                    page_content=text,
-                    metadata=metadata,
-                )
+        # ---------------------------------------------------------
+        # 1. 重置向量库
+        # ---------------------------------------------------------
+        if self.reset:
+            logger.warning("%s: reset=True，清空整个向量库", self.__class__.__name__)
+            self._reset_vector_store()
+
+        # ---------------------------------------------------------
+        # 2. 读取旧哈希
+        # ---------------------------------------------------------
+        if not self.reset:
+            self.saved_hashes = self.load_hashes()
+
+        # ---------------------------------------------------------
+        # 3. 扫描 & 计算当前哈希（键=相对路径）
+        # ---------------------------------------------------------
+        current_files = self.get_file_list()  # 绝对路径列表
+        self.current_hashes = {
+            self.get_relative_path(p): self.calculate_file_hash(p)
+            for p in current_files
+        }
+
+        # ---------------------------------------------------------
+        # 4. 计算差异
+        # ---------------------------------------------------------
+        if self.reset:
+            self.changed_files = list(self.current_hashes.keys())
+        else:
+            for rel_path, cur_hash in self.current_hashes.items():
+                if self.saved_hashes.get(rel_path) != cur_hash:
+                    self.changed_files.append(rel_path)
+
+            self.removed_files = [
+                rel for rel in self.saved_hashes
+                if rel not in self.current_hashes
+            ]
+
+        logger.info(
+            "%s: 当前文件 %d 个 | 变更 %d | 删除 %d",
+            self.__class__.__name__,
+            len(current_files),
+            len(self.changed_files),
+            len(self.removed_files),
+        )
+
+        # ---------------------------------------------------------
+        # 5. 没有变化直接返回
+        # ---------------------------------------------------------
+        if not self.changed_files and not self.removed_files and not self.reset:
+            logger.info("%s: 文档没有变化，跳过索引", self.__class__.__name__)
+            return
+
+        # ---------------------------------------------------------
+        # 6. 加载 + 切分（只处理变更文件）
+        # ---------------------------------------------------------
+        if self.changed_files:
+            self.load_documents(self.changed_files)
+            logger.info("%s: 已加载 %d 个 Document",
+                        self.__class__.__name__, len(self.docs))
+            if self.docs:
+                self.split_documents()
+                logger.info("%s: 切分为 %d 个子文档",
+                            self.__class__.__name__, len(self.splits))
+
+        # ---------------------------------------------------------
+        # 7. 写入向量库（先删后加）
+        # ---------------------------------------------------------
+        self.store_documents()
+
+        # ---------------------------------------------------------
+        # 8. 成功后再落盘哈希
+        # ---------------------------------------------------------
+        self.save_hashes(self.current_hashes)
+        logger.info("%s: RAG 索引完成", self.__class__.__name__)
+
+    # =============================================================
+    # 文件扫描 / 哈希
+    # =============================================================
+
+    def get_file_list(self) -> list[str]:
+        """扫描文档目录，返回绝对路径列表（不递归子目录）"""
+        if not self.docs_directory:
+            raise RAGIngestionException(f"{self.__class__.__name__}: 未配置目录")
+        if not os.path.isdir(self.docs_directory):
+            raise RAGIngestionException(
+                f"{self.__class__.__name__}: 文档目录不存在: {self.docs_directory}"
             )
 
+        exts = (".txt", ".md", ".pdf")
+        return [
+            os.path.join(self.docs_directory, name)
+            for name in sorted(os.listdir(self.docs_directory))
+            if name.endswith(exts)
+            and os.path.isfile(os.path.join(self.docs_directory, name))
+        ]
+
+    @staticmethod
+    def calculate_file_hash(file_path: str) -> str:
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def get_relative_path(self, file_path: str) -> str:
+        return os.path.relpath(file_path, self.docs_directory)
+
+    # =============================================================
+    # 哈希文件持久化
+    # =============================================================
+
+    def load_hashes(self) -> dict[str, str]:
+        if not os.path.exists(self.hash_file):
+            logger.info("%s: 未找到哈希文件，视为首次索引", self.__class__.__name__)
+            return {}
+        try:
+            with open(self.hash_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception as ex:
+            logger.warning("%s: 读取哈希文件失败: %s，将重新索引",
+                           self.__class__.__name__, ex)
+            return {}
+
+    def save_hashes(self, hashes: dict[str, str]) -> None:
+        os.makedirs(os.path.dirname(self.hash_file), exist_ok=True)
+        with open(self.hash_file, "w", encoding="utf-8") as f:
+            json.dump(hashes, f, ensure_ascii=False, indent=2, sort_keys=True)
+        logger.info("%s: 已保存 %d 个文件的哈希",
+                    self.__class__.__name__, len(hashes))
+
+    # =============================================================
+    # 加载 / 切分
+    # =============================================================
+
+    def load_documents(self, relative_paths: list[str]):
+        """加载指定（相对路径）文件，统一打上 source_file 元数据"""
+        self.docs = []
+        for rel_path in relative_paths:
+            abs_path = os.path.join(self.docs_directory, rel_path)
+            logger.info("%s: 加载 %s", self.__class__.__name__, rel_path)
+            try:
+                if abs_path.lower().endswith(".pdf"):
+                    documents = self.load_pdf(abs_path)
+                else:
+                    documents = TextLoader(abs_path).load()
+            except Exception as ex:
+                # 单个文件失败不影响其他文件
+                logger.error("%s: 加载 %s 失败: %s",
+                             self.__class__.__name__, rel_path, ex)
+                raise RAGIngestionException(
+                    f"加载文件失败: {rel_path}"
+                ) from ex
+
+            for doc in documents:
+                doc.metadata["source_file"] = rel_path
+            self.docs.extend(documents)
+
+    def load_pdf(self, file_path: str | Path) -> list[Document]:
+        pages = pymupdf4llm.to_markdown(
+            str(file_path), page_chunks=True, header=False, footer=False,
+        )
+        documents = []
+        for page in pages:
+            text = page["text"].strip()
+            if not text:
+                continue
+            documents.append(
+                Document(page_content=text, metadata=dict(page["metadata"]))
+            )
         return documents
 
     def split_documents(self):
-        """两阶段切分：先按 Markdown 标题切，再按长度切"""
         if not self.docs:
             raise RAGIngestionException(f"{self.__class__.__name__}: 未加载文档")
 
-        # 第一步：Markdown 标题切分（保留 section / subsection）
         md_splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=[
-                ("##", "section"),  # PyMuPDF4LLM 把一级标题输出成 ##
-                ("###", "subsection"),
-            ],
-            strip_headers=False,  # 标题文字保留在 chunk 里
+            headers_to_split_on=[("##", "section"), ("###", "subsection")],
+            strip_headers=False,
         )
-
-        # 第二步：超长的再按字符切
         char_splitter = RecursiveCharacterTextSplitter(
             chunk_size=settings.CHUNK_SIZE,
             chunk_overlap=settings.CHUNK_OVERLAP_SIZE,
             add_start_index=True,
-            separators=["\n\n", "\n","。", "！", "？", "；",".", "!", "?", ";","，", "、", ",", " ","",],
+            separators=[
+                "\n\n", "\n", "。", "！", "？", "；",
+                ".", "!", "?", ";",
+                "，", "、", ",", " ", "",
+            ],
         )
 
         first_pass: list[Document] = []
         for doc in self.docs:
             for s in md_splitter.split_text(doc.page_content):
-                # 继承原页的 metadata（page_number、title、author 等）
                 s.metadata.update(doc.metadata)
                 first_pass.append(s)
 
-        # 第二遍切分
         self.splits = []
         for s in first_pass:
             if len(s.page_content) <= settings.CHUNK_SIZE:
                 self.splits.append(s)
             else:
-                for sub in char_splitter.split_documents([s]):
-                    self.splits.append(sub)
+                self.splits.extend(char_splitter.split_documents([s]))
 
-    def ensure_indexed(docs_directory: str = "documents"):
-        """只在向量库为空时才建索引"""
-        from rag.vector import vector_store
+    # =============================================================
+    # 向量库操作
+    # =============================================================
 
-        ids = vector_store.get().get("ids", [])
-        if ids:
-            print(f"[eval] 向量库已有 {len(ids)} 条，跳过索引")
+    def _reset_vector_store(self):
+        """兼容不同 store 的清空方式"""
+        try:
+            self.vector_store.reset_collection()      # chromadb 原生
             return
+        except Exception:
+            pass
+        try:
+            self.vector_store.delete_collection()     # langchain-chroma
+            return
+        except Exception as ex:
+            logger.warning("%s: 无法清空向量库: %s", self.__class__.__name__, ex)
 
-        print("[eval] 向量库为空，开始索引")
-        RAGIngestion(docs_directory=docs_directory, reset=False)
+    def delete_file_documents(self, relative_path: str):
+        """按 source_file 删除某个文件对应的所有 chunk"""
+        logger.info("%s: 删除旧数据: %s", self.__class__.__name__, relative_path)
+        try:
+            self.vector_store.delete(where={"source_file": relative_path})
+        except Exception as ex:
+            raise RAGIngestionException(
+                f"{self.__class__.__name__}: 删除 {relative_path} 失败: {ex}"
+            ) from ex
+
     def store_documents(self):
-        """存储文档"""
-        #TOOD
-        if self.reset:
-            self.vector_store.reset_collection()
+        """先删除（已删除的文件 + 发生变化的文件的旧数据），再添加新 chunk"""
+        # 1. 删除已不存在的文件
+        for rel_path in self.removed_files:
+            self.delete_file_documents(rel_path)
 
-        self.vector_store.reset_collection()#之后可以不要每次服务启动都重建整个知识库，而是做增量索引。
-        if not self.splits:
-            raise RAGIngestionException(f"{self.__class__.__name__}: 未加载子文档")
-        self.document_ids = self.vector_store.add_documents(documents=self.splits)
-        logger.info("已索引文档: %s", len(self.vector_store.get().get("ids")))
+        # 2. 删除变更文件的旧数据（reset 时 collection 已空，跳过）
+        if not self.reset:
+            for rel_path in self.changed_files:
+                self.delete_file_documents(rel_path)
 
+        # 3. 添加新 chunk
+        if self.splits:
+            self.document_ids = self.vector_store.add_documents(
+                documents=self.splits
+            )
+            logger.info("%s: 新增 %d 个 chunk",
+                        self.__class__.__name__, len(self.document_ids))
+        else:
+            logger.info("%s: 没有新 chunk 需要写入", self.__class__.__name__)
+
+        try:
+            total = len(self.vector_store.get().get("ids", []) or [])
+            logger.info("%s: 当前向量库共 %d 条数据",
+                        self.__class__.__name__, total)
+        except Exception as ex:
+            logger.debug("统计向量库条数失败: %s", ex)
+
+
+    @staticmethod
+    def ensure_indexed(docs_directory: str = "documents", reset: bool = False):
+        """启动时调用一次即可"""
+        return RAGIngestion(docs_directory=docs_directory, reset=reset)
 
 
 if __name__ == "__main__":

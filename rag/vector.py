@@ -4,10 +4,9 @@ from langchain_chroma import Chroma
 from config import settings
 from langchain_huggingface import HuggingFaceEmbeddings
 
-
 embedding_model = HuggingFaceEmbeddings(
-    model_name=r"D:\models\bge-small-zh-v1.5",  # 用 BAAI/bge-small-zh-v1.5 这个模型做文本向量化
-    model_kwargs={"device": "cuda"},
+    model_name=settings.MODEL_NAME,  # 用 BAAI/bge-small-zh-v1.5 这个模型做文本向量化
+    model_kwargs=settings.MODEL_KWARGS,
     encode_kwargs={"normalize_embeddings": True},  # 这个是做向量归一化，让向量长度变成 1
 )#把一句话转换成一串数字（向量）的工具。
 
